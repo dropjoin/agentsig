@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSig — Policy Dashboard</title>
+<style>
+  :root{--bg:#0b0e14;--card:#131824;--line:#232b3d;--txt:#e8ecf4;--mut:#8b94a7;--acc:#4ade80;--warn:#fbbf24;--bad:#f87171}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:28px 18px 48px}
+  h1{font-size:26px;margin:0 0 4px} .sub{color:var(--mut);margin:0 0 22px;font-size:14px;line-height:1.5}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px} @media(max-width:640px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .card h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:0 0 10px}
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px}
+  .kv:last-child{border-bottom:none} .kv b{font-weight:600;text-align:right;word-break:break-all}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+  .pill{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.05em;border-radius:999px;padding:3px 9px;border:1px solid var(--line)}
+  .ok{color:var(--acc);border-color:var(--acc)} .pending{color:var(--warn);border-color:var(--warn)}
+  table{width:100%;border-collapse:collapse;font-size:13px} th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--mut);font-weight:600;font-size:12px} td{word-break:break-all}
+  .full{grid-column:1/-1} .err{color:var(--bad);font-size:13px} a{color:#7dd3fc}
+  button{background:#1b2334;color:var(--txt);border:1px solid var(--line);border-radius:9px;padding:8px 14px;cursor:pointer;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AgentSig</h1>
+  <p class="sub">Give your agent a wallet, not your keys. The agent's EVM address is derived from NEAR Chain
+  Signatures (MPC) — no private key exists anywhere. Every action must first pass the on-chain policy
+  stored in the NEAR contract below. <button id="refresh">Refresh</button></p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>On-chain policy (NEAR testnet)</h2>
+      <div id="policy"><p class="sub">Loading policy from policy.agentsigspike1103.testnet…</p></div>
+    </div>
+    <div class="card">
+      <h2>Agent identity</h2>
+      <div class="kv"><span>NEAR account</span><b class="mono">agentsigspike1103.testnet</b></div>
+      <div class="kv"><span>Derivation path</span><b class="mono">bsc,1</b></div>
+      <div class="kv"><span>Derived EVM address (BSC)</span><b class="mono">0xaE39D8017CD26d188593bDD55a706cC6ab412D9e</b></div>
+      <div class="kv"><span>Private key</span><b>none — MPC threshold signatures</b></div>
+      <div class="kv"><span>BSC testnet balance</span><b id="bal">checking…</b></div>
+      <div class="kv"><span>Signed demo tx broadcast</span><b><span class="pill pending" id="bcast">PENDING tBNB FUNDING</span></b></div>
+    </div>
+    <div class="card full">
+      <h2>Recorded actions (from the policy contract)</h2>
+      <div id="actions"><p class="sub">Loading action log…</p></div>
+    </div>
+    <div class="card full">
+      <h2>How the demo runs</h2>
+      <p class="sub" style="margin:0">1. Agent reads the policy from NEAR. 2. A task inside the caps and allowlist
+      passes; an over-cap task is rejected locally before any signature is requested. 3. For a passing task the
+      agent asks the NEAR MPC network to sign a BSC transaction. 4. The action is written back to the policy
+      contract as an audit record. Explorer links:
+      <a href="https://testnet.nearblocks.io/address/policy.agentsigspike1103.testnet" target="_blank" rel="noopener">policy contract</a> ·
+      <a href="https://testnet.bscscan.com/address/0xaE39D8017CD26d188593bDD55a706cC6ab412D9e" target="_blank" rel="noopener">derived address on BSC testnet</a></p>
+    </div>
+  </div>
+</div>
+<script>
+const RPCS = ["https://rpc.testnet.near.org","https://testnet.drpc.org"];
+const CONTRACT = "policy.agentsigspike1103.testnet";
+const DERIVED = "0xaE39D8017CD26d188593bDD55a706cC6ab412D9e";
+async function view(method, args){
+  const body = {jsonrpc:"2.0",id:"1",method:"query",params:{request_type:"call_function",account_id:CONTRACT,method_name:method,args_base64:btoa(JSON.stringify(args)),finality:"final"}};
+  let last;
+  for(const rpc of RPCS){
+    try{
+      const r = await fetch(rpc,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+      const j = await r.json();
+      if(j.result && j.result.result) return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result)));
+      last = j.error || j;
+    }catch(e){ last = e; }
+  }
+  throw last;
+}
+const wei = w => (Number(BigInt(w))/1e18).toString() + " BNB";
+async function load(){
+  try{
+    const p = await view("get_policy",{});
+    document.getElementById("policy").innerHTML =
+      '<div class="kv"><span>Contract</span><b class="mono">'+CONTRACT+'</b></div>'+
+      '<div class="kv"><span>Agent path</span><b class="mono">'+p.agent_path+'</b></div>'+
+      '<div class="kv"><span>Per-tx cap</span><b>'+wei(p.per_tx_cap_wei)+'</b></div>'+
+      '<div class="kv"><span>Daily cap</span><b>'+wei(p.daily_cap_wei)+'</b></div>'+
+      '<div class="kv"><span>Allowed targets</span><b class="mono">'+p.allowed_targets.join(", ")+'</b></div>'+
+      '<div class="kv"><span>Status</span><b><span class="pill '+(p.active?"ok":"pending")+'">'+(p.active?"ACTIVE":"INACTIVE")+'</span></b></div>';
+  }catch(e){ document.getElementById("policy").innerHTML = '<p class="err">Policy read failed (NEAR testnet RPC is flaky) — hit Refresh.</p>'; }
+  try{
+    const acts = await view("get_actions",{limit:20});
+    if(!acts.length){ document.getElementById("actions").innerHTML = '<p class="sub">No actions recorded yet.</p>'; }
+    else{
+      let h = '<table><tr><th>Target</th><th>Amount</th><th>BSC tx hash</th><th>When</th></tr>';
+      for(const a of acts.slice().reverse()){
+        h += '<tr><td class="mono">'+a.target+'</td><td>'+wei(a.amount_wei)+'</td><td class="mono">'+a.tx_hash+'</td><td>'+new Date(a.timestamp_ms).toLocaleString()+'</td></tr>';
+      }
+      document.getElementById("actions").innerHTML = h + '</table>';
+    }
+  }catch(e){ document.getElementById("actions").innerHTML = '<p class="err">Action log read failed — hit Refresh.</p>'; }
+  try{
+    const r = await fetch("https://bsc-testnet.publicnode.com",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_getBalance",params:[DERIVED,"latest"]})});
+    const j = await r.json();
+    const b = BigInt(j.result);
+    document.getElementById("bal").textContent = (Number(b)/1e18) + " tBNB";
+    if(b > 0n){ const el = document.getElementById("bcast"); el.textContent = "FUNDED — READY TO BROADCAST"; el.className = "pill ok"; }
+  }catch(e){ document.getElementById("bal").textContent = "unavailable"; }
+}
+document.getElementById("refresh").addEventListener("click", load);
+load();
+</script>
+</body>
+</html>
