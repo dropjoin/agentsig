@@ -99,3 +99,12 @@ npx tsx verify.ts          # offline sender-recovery check on agent/signed-tx.js
 ```
 
 After the run: record the redeploy tx, the new derived address, and the `request_signature` tx here; update the README table and the dashboard's hardcoded address; fund the new derived address with ~0.001 tBNB (human-gated faucet) to broadcast.
+
+### Operator run — EXECUTED 12 Nov 2026 ~21:22 WIB (throwaway testnet account only)
+
+- First redeploy attempt FAILED, tx `C2kUfmab1rAbsVC9sRHDQz3znYKrX1BoY5jBZh9hygmb`: `ActorNoPermission` — `deployContract` must be signed BY the contract account, not the parent. Fixed in `redeploy.ts`: the deploy is signed as the subaccount with the same keypair (the subaccount holds it as full-access since v1), while `set_policy` still goes through the parent client (predecessor must equal the owner). No state changed on the failed tx.
+- Redeploy SUCCEEDED, tx `FdrDEpKiW3daTnD5RMZuL4HkpczDge6uiM81BF45hLqF` (wasm 175,365 bytes). State compatibility proven: `get_actions` still returned the v1 record after the deploy.
+- New derived address (contract account + `bsc,1`): `0x47dDd9816DB0A5B80CD6a6CE0Fa714f098eC631A`. `set_policy` tx `CbB7Q5mpdhdZ1Asx6tqhRYqKwkL5uZoFJa8xUswbEFv1` re-pointed the allowlist at it. Note: the `get_policy` view immediately after the tx still showed the old target (finality lag: the tx was only optimistically executed); a re-read a minute later showed the new target. Views right after a write need a finality pause.
+- Scoped key created, tx `4EBKp8WEFpUPb4t9Bzauv74q27vcWUhHYNLi8MZ27fKK`, public key `ed25519:7H6xSvqyLk818cWuQDzw6W8p4Vmeq1ngyLY2jwHNbdyv`, written to `agent/.env.agent` (mode 600, never printed).
+- Agent v2 run SUCCEEDED: key check OK (scoped, `request_signature` only), policy PASS/REJECT as designed, `request_signature` tx `A8yaNThCjRPdgxY8NzLjRpJH3x4F6tb49yWYL828f6a2` returned the MPC signature in 7.8 s, signed BSC tx `0xd02ff2c9ead0e72a54d20976f291594dda5e54aa40dfc95aab6902b08f6cf0a0`, contract log gained the v2 record (payload hash `92d87227…1742`), `get_spent_today` = 1,000,000,000,000,000 wei. `verify.ts`: recovered == derived address, MATCH: true.
+- Still open: broadcast needs ~0.001 tBNB in the new derived address (human-gated faucet, same blocker as v1). The signed tx in `agent/signed-tx.json` stays valid while the address nonce is 0.

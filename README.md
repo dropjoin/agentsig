@@ -17,21 +17,22 @@ AgentSig gives the agent a **keyless wallet governed by an on-chain policy**:
 
 Think of it as a spending policy enforced by two chains: NEAR decides what is allowed, the MPC network holds the pen, BSC is where the agent acts.
 
-## Security fix (v2, 12 Nov 2026) — read this before the demo table
+## Security fix (v2, 12 Nov 2026) — deployed and proven on testnet
 
-v1 stored the policy on chain but enforced it only in the off-chain runtime: the agent called the MPC signer directly, so anyone holding the agent's NEAR key could skip the policy entirely. That hole was found in review, and v2 closes it with the gateway design above, plus the scoped-key requirement. The v1 demo run below is still the evidence on record; the v2 code is implemented, unit-tested (13/13, including the policy checks and the gas budget), and waiting on a redeploy — the steps are in [BUILD-LOG.md §5](BUILD-LOG.md). The redeploy changes the derived EVM address (the predecessor becomes the contract account), so the address in the table is the v1 address until the redeploy lands.
+v1 stored the policy on chain but enforced it only in the off-chain runtime: the agent called the MPC signer directly, so anyone holding the agent's NEAR key could skip the policy entirely. That hole was found in review, and v2 closes it with the gateway design above, plus the scoped-key requirement. v2 was deployed in place on 12 Nov 2026 (redeploy tx `FdrDEpKiW3daTnD5RMZuL4HkpczDge6uiM81BF45hLqF`, wasm 175,365 bytes) and the gateway run is proven: `request_signature` tx `A8yaNThCjRPdgxY8NzLjRpJH3x4F6tb49yWYL828f6a2`, MPC signature in 7.8 s, signed BSC tx hash `0xd02ff2c9ead0e72a54d20976f291594dda5e54aa40dfc95aab6902b08f6cf0a0`, offline sender recovery MATCHED the new derived address. The redeploy changed the derived EVM address (the predecessor is now the contract account): the current address is `0x47dDd9816DB0A5B80CD6a6CE0Fa714f098eC631A`, and the v1 address `0xaE39D8017CD26d188593bDD55a706cC6ab412D9e` is superseded.
 
 The remaining trust assumption is NEAR's MPC threshold itself: reconstructing a key needs a threshold of MPC nodes colluding (11 of 16 independent operators as of October 2026, all running in Intel TDX enclaves that don't let an operator read its own share). That assumption is shared by every Chain Signatures app; AgentSig removes the key from the agent and puts the policy on chain around it.
 
-## Live on testnet — v1 demo run (do this, see that)
+## Live on testnet (do this, see that)
 
 | Piece | Where |
 |---|---|
 | Policy contract | `policy.agentsigspike1103.testnet` — [NearBlocks](https://testnet.nearblocks.io/address/policy.agentsigspike1103.testnet) |
-| Deploy tx | `4prGuK6yd7LJxx4dMA3JHRxrcQkbpTrUU2mEbUkWzgun` |
+| v1 deploy tx | `4prGuK6yd7LJxx4dMA3JHRxrcQkbpTrUU2mEbUkWzgun` |
+| v2 redeploy tx | `FdrDEpKiW3daTnD5RMZuL4HkpczDge6uiM81BF45hLqF` (12 Nov 2026) |
 | Agent NEAR account | `agentsigspike1103.testnet` |
-| Derived EVM address (BSC, v1) | `0xaE39D8017CD26d188593bDD55a706cC6ab412D9e` — [BscScan testnet](https://testnet.bscscan.com/address/0xaE39D8017CD26d188593bDD55a706cC6ab412D9e) |
-| Stored policy | per-tx cap 0.01 BNB, daily cap 0.025 BNB, one allowlisted target, active |
+| Derived EVM address (BSC, v2) | `0x47dDd9816DB0A5B80CD6a6CE0Fa714f098eC631A` — [BscScan testnet](https://testnet.bscscan.com/address/0x47dDd9816DB0A5B80CD6a6CE0Fa714f098eC631A) |
+| Stored policy | per-tx cap 0.01 BNB, daily cap 0.025 BNB, one allowlisted target (the derived address itself), active |
 | Dashboard | open `dashboard/index.html` — reads the policy and the action log live from the contract |
 
 Run the demo yourself (v2 code):
@@ -46,8 +47,8 @@ Full evidence, tx hashes, and reproduction notes: [BUILD-LOG.md](BUILD-LOG.md).
 ## Status and honest limits
 
 - Proven on testnet (v1 run): policy read from chain, MPC signing, signature recovery, and the on-chain audit record (`record_action` tx `DqY1T7irizp6Tvgbg2NFtVBYNqD6adLtyKarZrXZvfn9`).
-- v2 (gateway + scoped key) is implemented and unit-tested but **not yet deployed** — the redeploy needs the deployer's key, and the steps are in BUILD-LOG §5. Until it lands, the deployed contract is still v1.
-- One step is pending a human-gated faucet: the derived address holds 0 tBNB, so the signed demo transaction (hash `0x64d556d88b41d503bc0a01ad581a8a0e519781ab927aeb3589945d7c73d71dd4`) has not been broadcast yet. Funding it with ~0.001 tBNB makes the saved signed transaction broadcastable as-is. After the v2 redeploy, the new derived address needs the same ~0.001 tBNB.
+- Proven on testnet (v2 run, 12 Nov 2026): the gateway enforces the policy on chain and returns the MPC signature through the contract callback (`request_signature` tx `A8yaNThCjRPdgxY8NzLjRpJH3x4F6tb49yWYL828f6a2`); the scoped-key check passed; the contract recorded the approved request and `get_spent_today` counted it; offline sender recovery MATCHED the new derived address.
+- One step is pending a human-gated faucet: the new derived address holds 0 tBNB, so the signed demo transaction (hash `0xd02ff2c9ead0e72a54d20976f291594dda5e54aa40dfc95aab6902b08f6cf0a0`) has not been broadcast yet. Funding it with ~0.001 tBNB makes the saved signed transaction broadcastable as-is.
 - Roadmap: more target chains via other derivation paths, a hosted dashboard, and a watcher that flags any spend from the derived address with no matching on-chain approval.
 
 ## Layout

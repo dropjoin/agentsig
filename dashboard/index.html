@@ -29,10 +29,10 @@
   <p class="sub">Give your agent a wallet, not your keys. The agent's EVM address is derived from NEAR Chain
   Signatures (MPC) — no private key exists anywhere. Every action must first pass the on-chain policy
   stored in the NEAR contract below. <button id="refresh">Refresh</button></p>
-  <p class="sub" style="border:1px solid var(--warn);border-radius:9px;padding:8px 12px">v2 (12 Nov 2026):
-  the policy contract now enforces the rules on chain and requests signatures itself; the agent never
-  calls the MPC signer directly. The address below is the v1 demo address — the v2 address (derived
-  from the contract account) replaces it after the redeploy. See BUILD-LOG §5.</p>
+  <p class="sub" style="border:1px solid var(--acc);border-radius:9px;padding:8px 12px">v2 DEPLOYED 12 Nov 2026:
+  the policy contract enforces the rules on chain and requests signatures itself, the agent never
+  calls the MPC signer directly. The address below is the v2 address (derived from the contract
+  account + path). The v1 address is superseded. See BUILD-LOG §5.</p>
 
   <div class="grid">
     <div class="card">
@@ -43,7 +43,7 @@
       <h2>Agent identity</h2>
       <div class="kv"><span>NEAR account</span><b class="mono">agentsigspike1103.testnet</b></div>
       <div class="kv"><span>Derivation path</span><b class="mono">bsc,1</b></div>
-      <div class="kv"><span>Derived EVM address (BSC)</span><b class="mono">0xaE39D8017CD26d188593bDD55a706cC6ab412D9e</b></div>
+      <div class="kv"><span>Derived EVM address (BSC)</span><b class="mono">0x47dDd9816DB0A5B80CD6a6CE0Fa714f098eC631A</b></div>
       <div class="kv"><span>Private key</span><b>none — MPC threshold signatures</b></div>
       <div class="kv"><span>BSC testnet balance</span><b id="bal">checking…</b></div>
       <div class="kv"><span>Signed demo tx broadcast</span><b><span class="pill pending" id="bcast">PENDING tBNB FUNDING</span></b></div>
@@ -60,14 +60,14 @@
       approved request, and only then calls the NEAR MPC signer. 4. The signed BSC tx is broadcast when the derived
       address is funded. v2 records store the signing payload hash; v1 records stored the signed tx hash. Explorer links:
       <a href="https://testnet.nearblocks.io/address/policy.agentsigspike1103.testnet" target="_blank" rel="noopener">policy contract</a> ·
-      <a href="https://testnet.bscscan.com/address/0xaE39D8017CD26d188593bDD55a706cC6ab412D9e" target="_blank" rel="noopener">derived address on BSC testnet</a></p>
+      <a href="https://testnet.bscscan.com/address/0x47dDd9816DB0A5B80CD6a6CE0Fa714f098eC631A" target="_blank" rel="noopener">derived address on BSC testnet</a></p>
     </div>
   </div>
 </div>
 <script>
 const RPCS = ["https://rpc.testnet.near.org","https://testnet.drpc.org"];
 const CONTRACT = "policy.agentsigspike1103.testnet";
-const DERIVED = "0xaE39D8017CD26d188593bDD55a706cC6ab412D9e";
+const DERIVED = "0x47dDd9816DB0A5B80CD6a6CE0Fa714f098eC631A";
 async function view(method, args){
   const body = {jsonrpc:"2.0",id:"1",method:"query",params:{request_type:"call_function",account_id:CONTRACT,method_name:method,args_base64:btoa(JSON.stringify(args)),finality:"final"}};
   let last;
