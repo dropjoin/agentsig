@@ -48,7 +48,7 @@ Full evidence, tx hashes, and reproduction notes: [BUILD-LOG.md](BUILD-LOG.md).
 
 - Proven on testnet (v1 run): policy read from chain, MPC signing, signature recovery, and the on-chain audit record (`record_action` tx `DqY1T7irizp6Tvgbg2NFtVBYNqD6adLtyKarZrXZvfn9`).
 - Proven on testnet (v2 run, 12 Nov 2026): the gateway enforces the policy on chain and returns the MPC signature through the contract callback (`request_signature` tx `A8yaNThCjRPdgxY8NzLjRpJH3x4F6tb49yWYL828f6a2`); the scoped-key check passed; the contract recorded the approved request and `get_spent_today` counted it; offline sender recovery MATCHED the new derived address.
-- One step is pending a human-gated faucet: the new derived address holds 0 tBNB, so the signed demo transaction (hash `0xd02ff2c9ead0e72a54d20976f291594dda5e54aa40dfc95aab6902b08f6cf0a0`) has not been broadcast yet. Funding it with ~0.001 tBNB makes the saved signed transaction broadcastable as-is.
+- Proven end to end on testnet (v2 run, 12 Nov 2026): the signed demo transaction was broadcast and CONFIRMED on BSC testnet, tx `0xd02ff2c9ead0e72a54d20976f291594dda5e54aa40dfc95aab6902b08f6cf0a0`, block 142317042, status 1 — [BscScan testnet](https://testnet.bscscan.com/tx/0xd02ff2c9ead0e72a54d20976f291594dda5e54aa40dfc95aab6902b08f6cf0a0). On-chain policy, MPC signature through the gateway, broadcast, confirmation: the whole loop works.
 - Roadmap: more target chains via other derivation paths, a hosted dashboard, and a watcher that flags any spend from the derived address with no matching on-chain approval.
 
 ## Layout
