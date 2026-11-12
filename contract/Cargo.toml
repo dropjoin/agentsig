@@ -1,6 +1,6 @@
 [package]
 name = "agentsig-policy"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [lib]
@@ -8,6 +8,11 @@ crate-type = ["cdylib"]
 
 [dependencies]
 near-sdk = "5"
+
+[dev-dependencies]
+# Enables near-sdk unit-test mocks (testing_env!, mocked promises). Only
+# active for `cargo test`; the wasm build is unaffected.
+near-sdk = { version = "5", features = ["unit-testing"] }
 
 [profile.release]
 opt-level = "z"

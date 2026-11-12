@@ -74,6 +74,52 @@ export class NearClient {
     return this.keyPair.getPublicKey();
   }
 
+  /**
+   * Fail closed unless the loaded key is a function-call access key scoped
+   * to the policy contract. A full-access key must never run the agent:
+   * with one, a compromised runtime could change the policy, add keys, or
+   * drain the NEAR account. The scoped key can only call
+   * `request_signature` on the policy contract, so the worst a compromise
+   * yields is an in-policy signature request.
+   */
+  async assertScopedKey(policyContractId: string): Promise<void> {
+    await this.ready;
+    const accessKey: any = await retry("viewAccessKey", () =>
+      this.provider.viewAccessKey(this.accountId, this.publicKey.toString(), {
+        finality: "final",
+      } as any),
+    );
+    const fail = (why: string): never => {
+      throw new Error(
+        `Refusing to run: ${why}. The agent must run with a function-call key scoped to ` +
+          `${policyContractId} (method request_signature only). Create one with the deployer's ` +
+          `full-access key via: npx tsx add-scoped-key.ts (run from contract/; it writes the ` +
+          `new key to agent/.env.agent, which the runtime prefers over agent/.env). ` +
+          `Full-access keys are never accepted here.`,
+      );
+    };
+    const perm = accessKey?.permission;
+    if (perm === "FullAccess" || perm?.FullAccess !== undefined) {
+      fail("the key in agent/.env is a full-access key");
+    }
+    const fc = perm?.FunctionCall;
+    if (!fc) fail("the key in agent/.env has an unrecognized permission");
+    if (fc.receiver_id !== policyContractId) {
+      fail(`the key is scoped to ${fc.receiver_id}, not the policy contract`);
+    }
+    const methods: string[] = fc.method_names ?? [];
+    if (methods.length > 0 && !methods.includes("request_signature")) {
+      fail("the key may not call request_signature");
+    }
+    if (fc.allowance != null && BigInt(fc.allowance) === 0n) {
+      fail("the key has zero allowance left");
+    }
+    console.log(
+      `Key check OK: function-call key scoped to ${policyContractId} ` +
+        `(methods: ${methods.length ? methods.join(",") : "all"})`,
+    );
+  }
+
   /** Build, sign, broadcast one transaction of `actions` to `receiverId`, and wait for its final outcome. */
   async sendActions(
     receiverId: string,

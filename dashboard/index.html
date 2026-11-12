@@ -29,6 +29,10 @@
   <p class="sub">Give your agent a wallet, not your keys. The agent's EVM address is derived from NEAR Chain
   Signatures (MPC) — no private key exists anywhere. Every action must first pass the on-chain policy
   stored in the NEAR contract below. <button id="refresh">Refresh</button></p>
+  <p class="sub" style="border:1px solid var(--warn);border-radius:9px;padding:8px 12px">v2 (12 Nov 2026):
+  the policy contract now enforces the rules on chain and requests signatures itself; the agent never
+  calls the MPC signer directly. The address below is the v1 demo address — the v2 address (derived
+  from the contract account) replaces it after the redeploy. See BUILD-LOG §5.</p>
 
   <div class="grid">
     <div class="card">
@@ -51,9 +55,10 @@
     <div class="card full">
       <h2>How the demo runs</h2>
       <p class="sub" style="margin:0">1. Agent reads the policy from NEAR. 2. A task inside the caps and allowlist
-      passes; an over-cap task is rejected locally before any signature is requested. 3. For a passing task the
-      agent asks the NEAR MPC network to sign a BSC transaction. 4. The action is written back to the policy
-      contract as an audit record. Explorer links:
+      passes the local pre-check; an over-cap task is rejected before any signature is requested. 3. For a passing task the
+      agent asks the POLICY CONTRACT for the signature: the contract re-checks the policy on chain, records the
+      approved request, and only then calls the NEAR MPC signer. 4. The signed BSC tx is broadcast when the derived
+      address is funded. v2 records store the signing payload hash; v1 records stored the signed tx hash. Explorer links:
       <a href="https://testnet.nearblocks.io/address/policy.agentsigspike1103.testnet" target="_blank" rel="noopener">policy contract</a> ·
       <a href="https://testnet.bscscan.com/address/0xaE39D8017CD26d188593bDD55a706cC6ab412D9e" target="_blank" rel="noopener">derived address on BSC testnet</a></p>
     </div>
@@ -92,7 +97,7 @@ async function load(){
     const acts = await view("get_actions",{limit:20});
     if(!acts.length){ document.getElementById("actions").innerHTML = '<p class="sub">No actions recorded yet.</p>'; }
     else{
-      let h = '<table><tr><th>Target</th><th>Amount</th><th>BSC tx hash</th><th>When</th></tr>';
+      let h = '<table><tr><th>Target</th><th>Amount</th><th>Payload / tx hash</th><th>When</th></tr>';
       for(const a of acts.slice().reverse()){
         h += '<tr><td class="mono">'+a.target+'</td><td>'+wei(a.amount_wei)+'</td><td class="mono">'+a.tx_hash+'</td><td>'+new Date(a.timestamp_ms).toLocaleString()+'</td></tr>';
       }

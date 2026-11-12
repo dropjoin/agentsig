@@ -1,4 +1,5 @@
 .env
+.env.agent
 node_modules/
 target/
 signed-tx.json

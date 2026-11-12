@@ -1,15 +1,26 @@
 /**
- * AgentSig agent runtime v1 (TESTNET ONLY).
+ * AgentSig agent runtime v2 (TESTNET ONLY).
  *
  * Flow:
- *  1. Read the spending policy from the AgentSig policy contract on NEAR testnet.
- *  2. Evaluate demo tasks against the policy LOCALLY. A violating task is
- *     rejected before any signature is requested (no MPC call is made for it).
- *  3. For the passing task, request an MPC signature via NEAR Chain
- *     Signatures (spike approach), assemble the signed BSC testnet tx, and
- *     broadcast it if the derived address holds enough tBNB; otherwise save
- *     the signed tx and report that broadcast is pending funding.
- *  4. Record the executed action on the NEAR policy contract.
+ *  1. Refuse to start unless the NEAR key in .env is a function-call key
+ *     scoped to the policy contract (method `request_signature` only).
+ *     A full-access key is never accepted: a compromised runtime must not
+ *     be able to change the policy, add keys, or drain the NEAR account.
+ *  2. Read the spending policy from the AgentSig policy contract on NEAR
+ *     testnet.
+ *  3. Evaluate demo tasks against the policy LOCALLY as a fast fail. This
+ *     is UX only: the contract re-checks everything on chain, and the
+ *     on-chain check is the authoritative one.
+ *  4. For the passing task, ask the POLICY CONTRACT for the signature
+ *     (`request_signature`). The contract enforces the policy on chain,
+ *     records the approved request, and only then calls the NEAR Chain
+ *     Signatures signer. The derived EVM address belongs to (contract
+ *     account, derivation path), so no signature for it exists outside
+ *     this path. The agent NEVER calls the signer directly.
+ *  5. Assemble the signed BSC testnet tx from the returned signature and
+ *     broadcast it if the derived address holds enough tBNB; otherwise
+ *     save the signed tx and report that broadcast is pending funding.
+ *  6. Read back the on-chain action log the contract recorded.
  */
 import * as fs from "node:fs";
 import { chainAdapters, contracts } from "chainsig.js";
@@ -18,15 +29,26 @@ import { bscTestnet } from "viem/chains";
 import { loadEnvFile, NearClient } from "./near.js";
 
 // ---------- config ----------
-const env = loadEnvFile(new URL("./.env", import.meta.url).pathname);
+// The runtime prefers agent/.env.agent (the scoped function-call key) and
+// falls back to agent/.env. Keep the full-access key in .env for deploys
+// and policy changes only; the runtime refuses to run with it.
+function loadAgentEnv(): { env: Record<string, string>; file: string } {
+  const dir = new URL("./", import.meta.url).pathname;
+  for (const name of [".env.agent", ".env"]) {
+    const p = dir + name;
+    if (fs.existsSync(p)) return { env: loadEnvFile(p), file: name };
+  }
+  throw new Error("No agent/.env.agent or agent/.env found (copy agent/.env.example to agent/.env)");
+}
+const { env, file: envFile } = loadAgentEnv();
+console.log("Using env file:", envFile);
 const accountId = env.NEAR_ACCOUNT_ID;
 const privateKey = env.NEAR_PRIVATE_KEY;
 const POLICY_CONTRACT = env.POLICY_CONTRACT_ID;
-if (!accountId || !privateKey) throw new Error("NEAR_ACCOUNT_ID / NEAR_PRIVATE_KEY missing in agent/.env");
-if (!POLICY_CONTRACT) throw new Error("POLICY_CONTRACT_ID missing in agent/.env (run the contract deploy first)");
+if (!accountId || !privateKey) throw new Error(`NEAR_ACCOUNT_ID / NEAR_PRIVATE_KEY missing in agent/${envFile}`);
+if (!POLICY_CONTRACT) throw new Error(`POLICY_CONTRACT_ID missing in agent/${envFile} (run the contract deploy first)`);
 
 const MPC_CONTRACT = "v1.signer-prod.testnet";
-const EXPECTED_DERIVED = "0xaE39D8017CD26d188593bDD55a706cC6ab412D9e";
 
 // ---------- BSC testnet RPC ----------
 const RPC_CANDIDATES = [
@@ -50,6 +72,9 @@ const near = new NearClient(accountId, privateKey);
 console.log("NEAR agent account:", accountId);
 console.log("Policy contract:", POLICY_CONTRACT);
 
+// Fail closed on a full-access key before doing anything else.
+await near.assertScopedKey(POLICY_CONTRACT);
+
 const policy = await near.viewFunction(POLICY_CONTRACT, "get_policy");
 if (!policy) throw new Error("No policy set on the policy contract");
 console.log("Policy read from NEAR:", JSON.stringify(policy));
@@ -64,21 +89,27 @@ console.log(
   `Recorded actions for path ${policy.agent_path}: ${recorded.length} total, spent today (UTC) ${spentTodayWei} wei`,
 );
 
-// ---------- Chain Signatures ----------
+// ---------- Chain Signatures (derivation + tx assembly only) ----------
+// The ChainSignatureContract instance is used ONLY for view calls (derived
+// public key) and tx assembly. Signing goes through the policy contract;
+// `csContract.sign` must never be called here.
 const csContract = new contracts.ChainSignatureContract({
   networkId: "testnet",
   contractId: MPC_CONTRACT,
   fallbackRpcUrls: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org", "https://near-testnet.drpc.org"],
 } as any);
 const evm = new chainAdapters.evm.EVM({ publicClient: publicClient as any, contract: csContract });
-const signerAccount = near.chainsigSignerAccount();
 
-const { address: derivedAddress } = await evm.deriveAddressAndPublicKey(accountId, policy.agent_path);
-console.log("Derived EVM address:", derivedAddress, "| matches spike:", derivedAddress === EXPECTED_DERIVED);
+// The derived address belongs to the CONTRACT account + path: the contract
+// is the account that requests signatures from the signer, so derivation
+// must use its id as predecessor. (v1 derived from the agent account,
+// because the agent called the signer directly.)
+const { address: derivedAddress } = await evm.deriveAddressAndPublicKey(POLICY_CONTRACT, policy.agent_path);
+console.log("Derived EVM address (contract account + path):", derivedAddress);
 const bal = await evm.getBalance(derivedAddress);
 console.log("Derived address tBNB balance (wei):", bal.balance.toString());
 
-// ---------- policy enforcement (local, pre-signature) ----------
+// ---------- policy pre-check (local fast fail; contract re-checks) ----------
 interface Task { label: string; to: string; valueWei: bigint }
 function evaluatePolicy(task: Task): { ok: boolean; reasons: string[] } {
   const reasons: string[] = [];
@@ -103,15 +134,15 @@ let passing: Task | undefined;
 for (const task of tasks) {
   const verdict = evaluatePolicy(task);
   if (verdict.ok) {
-    console.log(`POLICY PASS: "${task.label}" -> ${task.to} ${task.valueWei} wei`);
+    console.log(`POLICY PASS (local pre-check): "${task.label}" -> ${task.to} ${task.valueWei} wei`);
     passing = passing ?? task;
   } else {
-    console.log(`POLICY REJECT: "${task.label}" -> ${task.to} ${task.valueWei} wei | reasons: ${verdict.reasons.join("; ")}`);
+    console.log(`POLICY REJECT (local pre-check): "${task.label}" -> ${task.to} ${task.valueWei} wei | reasons: ${verdict.reasons.join("; ")}`);
   }
 }
 if (!passing) throw new Error("No task passed the policy; nothing to execute");
 
-// ---------- execute the passing task via MPC ----------
+// ---------- build the unsigned tx + hash to sign ----------
 console.log(`\nExecuting passing task: ${passing.label}`);
 let transaction: any;
 let hashesToSign: any;
@@ -143,15 +174,36 @@ try {
   const unsigned = serializeTransaction(transaction as any);
   hashesToSign = [Array.from(toBytes(keccak256(unsigned)))];
 }
+const payloadHex = Buffer.from(hashesToSign[0]).toString("hex");
+console.log("Signing payload (tx hash):", payloadHex);
 
+// ---------- request the signature THROUGH the policy contract ----------
+// 300 TGas: the contract forwards most of it to the signer and reserves
+// 30 TGas for its callback. A policy violation fails here, inside the
+// contract, before any MPC call is made.
 const t0 = Date.now();
-const rsvSignatures = await csContract.sign({
-  payloads: hashesToSign,
-  path: policy.agent_path,
-  keyType: "Ecdsa",
-  signerAccount,
-});
-console.log(`MPC signature received in ${Date.now() - t0} ms`);
+const { txHash: signTxHash, outcome } = await near.functionCall(
+  POLICY_CONTRACT,
+  "request_signature",
+  {
+    target: passing.to,
+    amount_wei: passing.valueWei.toString(),
+    payload_hex: payloadHex,
+  },
+  300_000_000_000_000n,
+  0n,
+);
+console.log(`request_signature NEAR tx: ${signTxHash} (MPC signature received in ${Date.now() - t0} ms)`);
+
+// The contract callback returns the MPC SignResult JSON as the final
+// SuccessValue of the transaction (base64-encoded, like every NEAR
+// return value). Convert it to r/s/v exactly like chainsig.js `toRSV`.
+const successB64 = (outcome as any)?.status?.SuccessValue;
+if (typeof successB64 !== "string" || !successB64) {
+  throw new Error("request_signature returned no SuccessValue; inspect the NEAR tx outcome");
+}
+const mpcResult = JSON.parse(Buffer.from(successB64, "base64").toString("utf8"));
+const rsvSignatures = [mpcResultToRsv(mpcResult)];
 
 const signedTx = evm.finalizeTransactionSigning({ transaction, rsvSignatures }) as Hex;
 const bscTxHash = keccak256(signedTx);
@@ -189,15 +241,28 @@ if (bal.balance >= passing.valueWei + gasCost) {
   );
 }
 
-// ---------- record the action on NEAR ----------
-const { txHash: recordTxHash } = await near.functionCall(POLICY_CONTRACT, "record_action", {
-  agent_path: policy.agent_path,
-  target: passing.to,
-  amount_wei: passing.valueWei.toString(),
-  tx_hash: broadcastHash ?? bscTxHash,
-});
-console.log("record_action NEAR tx:", recordTxHash);
-
+// ---------- read back the on-chain record (written by the contract) ----------
 const actionsAfter: any[] = await near.viewFunction(POLICY_CONTRACT, "get_actions", { limit: 100 });
 console.log("Actions on policy contract now:", JSON.stringify(actionsAfter));
+const spentToday = await near.viewFunction(POLICY_CONTRACT, "get_spent_today");
+console.log("Spent today per contract (wei):", spentToday);
 console.log("AGENT RUN DONE");
+
+/**
+ * chainsig.js `toRSV` (cryptography utils), copied semantics: the MPC
+ * `big_r.affine_point` is the R x-coordinate with a "04" prefix, `s` is
+ * the scalar, and `v` is recovery_id + 27. Both the object form and the
+ * flat string form of the SignResult are accepted.
+ */
+function mpcResultToRsv(sig: any): { r: string; s: string; v: number } {
+  if (
+    "big_r" in sig && typeof sig.big_r === "object" && "affine_point" in sig.big_r &&
+    "s" in sig && typeof sig.s === "object" && "scalar" in sig.s
+  ) {
+    return { r: sig.big_r.affine_point.substring(2), s: sig.s.scalar, v: sig.recovery_id + 27 };
+  }
+  if ("big_r" in sig && typeof sig.big_r === "string" && "s" in sig && typeof sig.s === "string") {
+    return { r: sig.big_r.substring(2), s: sig.s, v: sig.recovery_id + 27 };
+  }
+  throw new Error("Invalid MPC signature format");
+}
